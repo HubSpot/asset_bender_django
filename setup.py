@@ -9,12 +9,11 @@ setup(
     author='HubSpot Dev Team',
     author_email='devteam+asset_bender_django@hubspot.com',
     url='https://github.com/HubSpot/asset_bender_django',
-    # download_url='https://github.com/HubSpot/hapipy/tarball/v2.10.1',
+    # download_url='https://github.com/HubSpot/',
     license='LICENSE.txt',
     packages=['asset_bender'],
     install_requires=[
-        # 'nose==1.1.2',
-        # 'unittest2==0.5.1',
-        # 'simplejson>=2.1.2'
+        'django>=1.3.0',
+        'hscacheutils<=1.0.0',
     ],
 )
