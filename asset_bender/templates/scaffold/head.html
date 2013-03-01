@@ -1,0 +1,13 @@
+{% if bender_scaffold %}
+  <!-- HEADER CSS -->
+  {{ bender_scaffold.header_css_html|safe }}
+
+  {% if bender_scaffold.header_forced_import_css_html %}
+    <style>
+      {{ bender_scaffold.header_forced_import_css_html|safe }} 
+    </style>
+  {% endif %}
+
+  <!-- HEADER JS -->
+  {{ bender_scaffold.header_js_html|safe }}
+{% endif %}
