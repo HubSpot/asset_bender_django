@@ -1,37 +1,63 @@
 '''
-V3 of our bundling system
+##Usage:
 
-Usage:
-First, make sure you have static3 properties and local daemon configured properly according to the docs:
-https://git.hubteam.com/HubSpot/hubspot_static_daemon/blob/master/Readme.markdown
-Second, in your app's context processor do:
+First, make sure you've installed asset_bender: https://github.com/HubSpot/asset_bender/tree/master
 
-from django.template import RequestContext
-from hsdjango.bundling3a import Static3
+Secondly, make sure that PROJ_NAME, PROJ_DIR, BENDER_S3_DOMAIN, and BENDER_CDN_DOMAIN are set in your
+settings. PROJ_NAME should match the name in static_conf.json and PROJ_DIR needs to point to the python
+module path (via something like `PROJ_DIR = dirname(realpath(__file__))`). 
 
-def my_context_processor(request):
-    context = RequestContext(request)
-    static3 = Static3([
-         'my_project/static/js/my_project_bundle.js', 
-         'my_project/static/css/my_project_bundle.css', 
-         'some_library/static/js/some_library_bundle.js', 
-         'some_library/static/css/some_library_bundle.js'
-         ... etc ...
-         ],
-         request.GET)
-     context.update(static3.generate_context_dict())
-     return context
+BENDER_S3_DOMAIN is the domain that points to your S3 bucket and BENDER_CDN_DOMAIN is the CDN domain in
+front of S3 (if you have one).
 
-Provided you are using a template derived from the base style_guide layouts,
-all the js and css from the bundles will be included automagically in your outputed HTML 
+Thirdly, make sure that you've included these lines in your Manifest.in:
+
+    global-include static_conf.json
+    global-include prebuilt_recursive_static_conf.json
+
+
+Next, in your app's context processor do:
+
+    from django.template import RequestContext
+    from asset_bender.bundling import BenderAssets
+
+    def my_context_processor(request):
+        context = RequestContext(request)
+
+        bender_assets = BenderAssets([
+             'my_project/static/js/my_project_bundle.js', 
+             'my_project/static/css/my_project_bundle.css', 
+
+             'some_library/static/js/some_library_bundle.js', 
+             'some_library/static/css/some_library_bundle.js'
+
+             ... etc ...
+         ], request.GET)
+
+         context.update(bender_assets.generate_context_dict())
+         return context
+
+And lastly, in your base template you'll need to include these templates:
+
+    <head>
+        ...
+        {% include "scaffold/head.html" %}
+        ...
+    </head>
+
+    <body>
+        ...
+
+        {% include "scaffold/end_of_body.html" %}
+    </body>
+
 
 To manually include a particular static asset in your HTML, use the template tag:
     
-    {% load static_tags %}
-    {% static3_url "project_name/static/js/my-file.js" %}
+    {% load asset_bender_tags %}
+    {% bender_url "project_name/static/js/my-file.js" %}
 
-The tag will output a full url with the proper domain and build name.
-
+The tag will output a full url with the proper domain and version number (as specified by this projects's dependencies).
 
 '''
 import hashlib
@@ -44,13 +70,15 @@ try:
     import simplejson as json
 except ImportError:
     import json
-import warnings
 
-from hubspot.hsutils import get_setting, get_setting_default, download_url_with_retries
+try:
+    from hubspot.hsutils import get_setting, get_setting_default
+except ImportError:
+    from hscacheutils.setting_wrappers import get_setting, get_setting_default
+    
+from hscacheutils.raw_cache import MAX_MEMCACHE_TIMEOUT
+from hscacheutils.generational_cache import CustomUseGenCache, DummyGenCache
 
-from hubspot.raw_cache import MAX_MEMCACHE_TIMEOUT
-from hsdjango.generational_cache import CustomUseGenCache, DummyGenCache
-from hsdjango.global_context import get_current_request
 
 logger = logging.getLogger(__name__)
 
@@ -59,30 +87,37 @@ JS_EXTENSIONS  = ('js', 'coffee')
 NON_PRECOMPILED_EXTENSIONS = ('js', 'css')
 PRECOMPILED_EXTENSIONS = tuple([ext for ext in CSS_EXTENSIONS + JS_EXTENSIONS if ext not in NON_PRECOMPILED_EXTENSIONS])
 
-TAG_FUNCTION_NAME = 'static3_asset_url_callback'
-SCAFFOLD_CONTEXT_NAME = 'scaffold_v3'
-STATIC_DOMAIN_CONTEXT_NAME = 'static_v3_domain'
+TAG_FUNCTION_NAME = 'bender_asset_url_callback'
+SCAFFOLD_CONTEXT_NAME = 'bender_scaffold'
+BENDER_ASSETS_CONTEXT_NAME = 'bender_assets_instance'
+STATIC_DOMAIN_CONTEXT_NAME = 'bender_domain'
 
 FORCE_BUILD_PARAM_PREFIX = "forceBuildFor-"
 HOST_NAME = socket.gethostname()
 
 def build_scaffold(request, included_bundles):
-    return Static3(included_bundles, request.GET).generate_scaffold()
+    return BenderAssets(included_bundles, request.GET).generate_scaffold()
 
-def get_static_url(full_asset_path):
+def get_static_url(full_asset_path, template_context=None, bender_assets=None):
     '''
     Gets an absolute url with the correct build version for an asset of the given project name.
     
-    Uses the thread local current request to cache the static3 object so that we only have to hit memcached
-    for the build versions once per request
+    Re-uses the BenderAssets instance on the template context so that we only have to hit memcached
+    for the build versions once per request (or you can manually pass in an instance).
     '''
-    request = get_current_request()
-    static3 = getattr(request, 'static3', None)
-    if not static3:
-        static3 = Static3()
-    if request:
-        request.static3 = static3
-    return static3.get_static3_asset_url(full_asset_path)
+
+    if template_context == None and bender_assets == None:
+        logger.warning("No template_context or bender_assets instance passed, that will probably cause lots of excess memcache requests")
+    elif bender_assets == None:
+        bender_assets = template_context.get(BENDER_ASSETS_CONTEXT_NAME)
+
+    if not bender_assets:
+        bender_assets = BenderAssets()
+
+    if template_context and not template_context.get(BENDER_ASSETS_CONTEXT_NAME):
+        template_context.get(BENDER_ASSETS_CONTEXT_NAME, bender_assets)
+
+    return bender_assets.get_bender_asset_url(full_asset_path)
 
 def _is_only_on_qa():
     return get_setting('ENV') == 'qa'
@@ -94,24 +129,27 @@ project_version_cache = CustomUseGenCache([
     timeout=MAX_MEMCACHE_TIMEOUT)
 
 scaffold_cache = CustomUseGenCache([
-    'static3_all_scaffolds',
-    'static3_scaffold_for_project:scaffold_key'
+    'bender_all_scaffolds',
+    'bender_scaffold_for_project:scaffold_key'
     ],
     timeout=MAX_MEMCACHE_TIMEOUT)
 
-if get_setting_default('STATIC3_NO_CACHE', False):
+if get_setting_default('BENDER_NO_CACHE', False):
     project_version_cache = DummyGenCache()
     scaffold_cache = DummyGenCache()
 
 def invalidate_cache_for_deploy(project_name):
     '''
-    Called by the fabdeploy on any deploy of a project containing static assets
+    Invalidates the Asset Bender versions for this project. Do this as a part of your build
+    and/or deploy scripts to force a live running app to resolve its versions anew (and run against
+    the latest front-end code).
     '''
     project_version_cache.invalidate('static_build_name_for:project', project=project_name)
     project_version_cache.invalidate('static_deps_for_project:host_project', host_project=project_name)
-    scaffold_cache.invalidate('static3_all_scaffolds')
+    scaffold_cache.invalidate('bender_all_scaffolds')
 
-class Static3(object):
+
+class BenderAssets(object):
     def __init__(self, bundle_paths=(), http_get_params=None, exclude_default_bundles=False):
         '''
         @bundle_paths - a list containing the paths of the bundles to include
@@ -124,9 +162,9 @@ class Static3(object):
 
         self.included_bundle_paths = []
 
-        # Used for the (rare) cases when you don't want to include the style guide bundles
+        # Used for the cases when you don't want to include the default bundles (style_guide)
         if not exclude_default_bundles:
-            self.included_bundle_paths.extend(get_setting_default('DEFAULT_BUNDLES_V3', []))
+            self.included_bundle_paths.extend(get_setting_default('DEFAULT_BUNDLES', []))
 
         self.included_bundle_paths.extend(bundle_paths)
 
@@ -138,18 +176,20 @@ class Static3(object):
         forced_build_version_by_project = self._extract_forced_versions_from_params(http_get_params)
         self.s3_fetcher = S3BundleFetcher(self.host_project_name, self.is_debug, forced_build_version_by_project)
         is_local_debug = self.is_debug
-        if get_setting_default('STATIC3_LOCAL_PROJECT_MODE', False):
+
+        if get_setting_default('BENDER_LOCAL_PROJECT_MODE', False):
             is_local_debug = True
+
         self.local_daemon_fetcher = LocalDaemonBundleFetcher(self.host_project_name, is_local_debug, forced_build_version_by_project)
 
     def generate_context_dict(self):
         '''
-        Helper to get the variables you need to exist in your
-        request context for static3
+        Helper to get the variables you need to exist in your request context for Asset Bender
         '''
         return {
             SCAFFOLD_CONTEXT_NAME: self.generate_scaffold(),
-            STATIC_DOMAIN_CONTEXT_NAME: self.get_domain()
+            STATIC_DOMAIN_CONTEXT_NAME: self.get_domain(),
+            BENDER_ASSETS_CONTEXT_NAME: self,
         }
 
     def generate_scaffold(self):
@@ -161,7 +201,8 @@ class Static3(object):
         '''
         cache_key = self._get_scaffold_cache_key()
         scaffold = None
-        # we don't cache the scaffold during local development or when ?forceBuildFor-<project> params are used
+
+        # We don't cache the scaffold during local development or when ?forceBuildFor-<project> params are used
         if not self.use_local_daemon and not self.skip_scaffold_cache:
             scaffold = scaffold_cache.get(scaffold_key=cache_key)
 
@@ -220,10 +261,10 @@ class Static3(object):
 
     def invalidate_scaffold_cache(self):
         cache_key = self._get_scaffold_cache_key()
-        scaffold_cache.invalidate('static3_scaffold_for_project:scaffold_key', 
+        scaffold_cache.invalidate('bender_scaffold_for_project:scaffold_key', 
                                   scaffold_key=cache_key)
 
-    def get_static3_asset_url(self, full_asset_path):
+    def get_bender_asset_url(self, full_asset_path):
         '''
         Builds a URL to the particulr CSS, JS, IMG, or other file that is
         part of project_name.  The URL includes the proper domain and build information.
@@ -272,14 +313,14 @@ class Static3(object):
                 raise Exception("You cannot use the '%s' extension in a bundle path, you must use 'js' or 'css' (It can work locally, but it won't work on QA/prod)." % extension)
 
     def _check_use_local_daemon_for_project(self, bundle_path):
-        if not get_setting_default('STATIC3_LOCAL_PROJECT_MODE', False):
+        if not get_setting_default('BENDER_LOCAL_PROJECT_MODE', False):
             return False
         if bundle_path.startswith(self.host_project_name + '/'):
             return True
         return False
 
     def _check_use_local_daemon(self, request):
-        use_local = get_setting_default('STATIC3_LOCAL_MODE', None)
+        use_local = get_setting_default('BENDER_LOCAL_MODE', None)
         if use_local != None:
             return use_local
         if get_setting('ENV') in ('local',):
@@ -295,11 +336,11 @@ class Static3(object):
         if hs_debug:
             return hs_debug != 'false'
 
-        local_mode = get_setting_default('STATIC3_LOCAL_MODE', None)
+        local_mode = get_setting_default('BENDER_LOCAL_MODE', None)
         if local_mode != None:
             return local_mode
 
-        debug_mode = get_setting_default('STATIC3_DEBUG_MODE', None)
+        debug_mode = get_setting_default('BENDER_DEBUG_MODE', None)
         if debug_mode != None:
             return debug_mode
 
@@ -343,7 +384,7 @@ class Static3(object):
 
 class BundleFetcherBase(object):
     '''
-    Base class from getting included assets from either the local daemon or S3
+    Base class from getting included assets from either the local Asset Bender server or S3
     '''
     src_or_href_regex = re.compile(r'((?:src|href)=([\'"]))([^\'"]+\2)')
 
@@ -384,7 +425,7 @@ class BundleFetcherBase(object):
             raise BundleException("Unkown or empty bundle: %s " % url)
 
     def _append_static_domain_to_links(self, html):
-        # Use the Akamai-backed cdn domain instead of directly pointing to s3.
+        # Use the CDN domain instead of directly pointing to the s3 domain.
         # Only doing the switch at this point because the rest of the build fetching code
         # needs to use the s3 domain (to not get borked by caching).
         result = self.src_or_href_regex.sub(r'\1//%s\3' % self.get_domain(), html)
@@ -446,7 +487,7 @@ class LocalDaemonBundleFetcher(BundleFetcherBase):
         return url
 
     def get_domain(self):
-        return get_setting_default('STATIC3_DAEMON_DOMAIN', 'localhost:3333')
+        return get_setting_default('BENDER_DAEMON_DOMAIN', 'localhost:3333')
 
     def _fetch_build_version(self, project_name):
         """
@@ -574,7 +615,7 @@ class S3BundleFetcher(BundleFetcherBase):
         if project_name == self.host_project_name:
             build_version = self._get_prebuilt_version(project_name)
             if not build_version:
-                build_version = os.environ.get('HS_STATIC3_FORCED_BUILD_VERSION_%s' % project_name.upper())
+                build_version = os.environ.get('HS_BENDER_FORCED_BUILD_VERSION_%s' % project_name.upper())
         return build_version
 
     def _fetch_build_version_without_cache(self, project_name):
@@ -668,18 +709,18 @@ class S3BundleFetcher(BundleFetcherBase):
           return cmp(x[1], y[1])
 
     def get_domain(self):
-        return get_setting_default('STATIC3_CDN_DOMAIN', 'static2cdn.hubspot.com')
+        return get_setting_default('BENDER_CDN_DOMAIN', 'static2cdn.hubspot.com')
 
     def _get_non_cdn_domain(self):
         '''
         When downloading the version pointer, we need to skip the CDN and go direct to avoid problems with caching
         '''
-        return get_setting_default('STATIC3_S3_DOMAIN', 'hubspot-static2cdn.s3.amazonaws.com')
+        return get_setting_default('BENDER_S3_DOMAIN', 'hubspot-static2cdn.s3.amazonaws.com')
 
 
 class Scaffold(object):
     """
-    An object for holding a set of js and css variables
+    An object for holding a set of js and css paths
     """
 
     # Lovely IE, http://john.albin.net/css/ie-stylesheets-not-loading ...
@@ -779,7 +820,7 @@ def _load_json_file_with_cache(path, throw_exception_if=None):
         return _file_json_cache[path]
 
     if not os.path.isfile(path):
-        if hasattr(throw_exception_if, '__call__') and throw_exception_if() and not get_setting_default('STATIC3_QA_EMULATION', False):
+        if hasattr(throw_exception_if, '__call__') and throw_exception_if() and not get_setting_default('BENDER_QA_EMULATION', False):
             raise IOError("""
 Couldn't find the prebuilt static dependencies file at: %s
 You should double check that your static and jenkins config are correct. And that you have these lines in your Manifest.in:
