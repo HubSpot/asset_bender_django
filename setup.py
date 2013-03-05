@@ -5,7 +5,7 @@ setup(
     name='asset_bender',
     version='0.1.2',
     description="A django runtime implementation for Asset Bender",
-    long_description=open('README.md').read(),
+    long_description=open('Readme.md').read(),
     author='HubSpot Dev Team',
     author_email='devteam+asset_bender_django@hubspot.com',
     url='https://github.com/HubSpot/asset_bender_django',
