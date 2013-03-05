@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='asset_bender',
-    version='0.1.2',
+    version='0.1.3',
     description="A django runtime implementation for Asset Bender",
     long_description=open('Readme.md').read(),
     author='HubSpot Dev Team',
