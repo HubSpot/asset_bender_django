@@ -1,0 +1,3 @@
+
+class AssetBenderException(Exception):
+    pass
