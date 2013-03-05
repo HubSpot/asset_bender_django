@@ -18,6 +18,8 @@ except ImportError:
 from hscacheutils.raw_cache import MAX_MEMCACHE_TIMEOUT
 from hscacheutils.generational_cache import CustomUseGenCache, DummyGenCache
 
+from asset_bender.http import fetch_ab_url_with_retries
+
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +105,7 @@ class BenderAssets(object):
 
         # Used for the cases when you don't want to include the default bundles (style_guide)
         if not exclude_default_bundles:
-            self.included_bundle_paths.extend(get_setting_default('DEFAULT_BUNDLES', []))
+            self.included_bundle_paths.extend(get_setting_default('DEFAULT_ASSET_BENDER_BUNDLES', []))
 
         self.included_bundle_paths.extend(bundle_paths)
 

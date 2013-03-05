@@ -7,6 +7,7 @@ from asset_bender import AssetBenderException
 logger = logging.getLogger(__name__)
 
 
+# For testing
 class FauxException(Exception):
     pass
 
