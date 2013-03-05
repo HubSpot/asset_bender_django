@@ -349,20 +349,6 @@ class BundleFetcherBase(object):
     def get_domain(self):
         raise NotImplementedError("Implement me in a subclass")
 
-    def _check_for_fetch_html_errors_and_raise_exception(self, result, url):
-        '''
-        Helper for adding additional messaging to exceptions loading static content
-        '''
-        if result.has_not_found_error():
-            raise BundleException("Could not find the bundle at the url %s " % url)
-        elif result.has_connect_error():
-            raise BundleException("Couldn't reach the static daemon running at %s" % url)
-        elif result.has_error():
-            logger.error("Unknown error when requesting expanded bundle html from the static daemon (via %s)" % url)
-            raise BundleException(result.content)
-        elif not result.content:
-            raise BundleException("Unkown or empty bundle: %s " % url)
-
     def _append_static_domain_to_links(self, html):
         # Use the CDN domain instead of directly pointing to the s3 domain.
         # Only doing the switch at this point because the rest of the build fetching code
@@ -385,20 +371,6 @@ class BundleFetcherBase(object):
     def _is_specific_build_name(self, build_name):
        return isinstance(build_name, basestring) and build_name.startswith('static-')
 
-    def _format_result_error(self, content):
-        if not content:
-            return '(No error body found)'
-        start_code_block = content.find('<pre>')
-        end_code_block = content.find('</pre>')
-        if start_code_block < 0 or end_code_block < start_code_block:
-            return content
-        error = content[start_code_block + 5:end_code_block]
-        # Unescape entities in the error
-        from BeautifulSoup import BeautifulStoneSoup, Tag
-        error = BeautifulStoneSoup(error, convertEntities=BeautifulStoneSoup.HTML_ENTITIES).contents[0]
-        if isinstance(error, Tag):
-            error = ''.join(error.contents)
-        return "Error from hs-static:\n\n%s" % error
 
 class LocalDaemonBundleFetcher(BundleFetcherBase):
     def fetch_include_html(self, bundle_path):
@@ -408,11 +380,10 @@ class LocalDaemonBundleFetcher(BundleFetcherBase):
              bundle_path,
              self.host_project_name
              )
-        result = download_url_with_retries(url, timeouts=[1, 5, 25])
-        if result.has_not_found_error():
-            return ''
-        self._check_for_fetch_html_errors_and_raise_exception(result, url)
-        html = self._append_static_domain_to_links(result.content)
+
+        result = fetch_ab_url_with_retries(url, timeouts=[1, 5, 25])
+        html = self._append_static_domain_to_links(result.text)
+
         return html
 
     def get_asset_url(self, project_name, asset_path):
@@ -448,14 +419,8 @@ class LocalDaemonBundleFetcher(BundleFetcherBase):
              project_name,
              self.host_project_name)
 
-        result = download_url_with_retries(url, timeouts=[1, 2, 5])
-
-        if result.has_error():
-            result.content = self._format_result_error(result.content)
-            
-        self._check_for_fetch_html_errors_and_raise_exception(result, url)
-        print "\n", "build from daemon for %s: %s  (host: %s)\n" % (project_name, result.content, self.host_project_name)
-        return result.content
+        result = fetch_ab_url_with_retries(url, timeouts=[1, 2, 5])
+        return result.text
 
 class S3BundleFetcher(BundleFetcherBase):
     def fetch_include_html(self, bundle_path):
@@ -472,11 +437,9 @@ class S3BundleFetcher(BundleFetcherBase):
             build_version,
             bundle_postfix_path,
             '-expanded' if self.is_debug else '')
-        result = download_url_with_retries(url, timeouts=[1,2,5])
-        if result.has_error():
-            result.content = self._format_result_error(result.content)
-        self._check_for_fetch_html_errors_and_raise_exception(result, url)
-        return self._append_static_domain_to_links(result.content)
+
+        result = fetch_ab_url_with_retries(url, timeouts=[1,2,5])
+        return self._append_static_domain_to_links(result.text)
 
 
     def get_asset_url(self, project_name, asset_path):
@@ -590,10 +553,13 @@ class S3BundleFetcher(BundleFetcherBase):
         from S3 and gets the actual build version from it (ex. 1.4.123 )
         '''
         url = self.make_url_to_pointer(pointer, project_name)
-        result = download_url_with_retries(url, timeouts=[1, 2, 5])
-        if result.has_error() or not result.content:
+        result = fetch_ab_url_with_retries(url, timeouts=[1, 2, 5])
+
+        if not result.text:
             self._check_for_fetch_html_errors_and_raise_exception(result, url)
-        return result.content.strip()
+            raise AssetBenderException("Invalid version file (empty) from: %s" % url)
+
+        return result.text.strip()
 
     def _get_prebuilt_version(self, project_name):
         '''
@@ -780,9 +746,6 @@ If you have any questions, you can bug tfinley@hubspot.com.
         f.close()
         _file_json_cache[path] = data
         return data
-
-class BundleException(Exception):
-    pass
 
 
 path_extension_regex = re.compile(r'/(css|sass|scss|coffee|js)/')
