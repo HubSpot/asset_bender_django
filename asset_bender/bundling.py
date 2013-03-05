@@ -636,6 +636,9 @@ class Scaffold(object):
     # js files that append link/style blocks later.
     MAX_IE_CSS_INCLUDES = 20
 
+    head_template = "asset_bender/scaffold/head.html"
+    end_of_body_template = "asset_bender/scaffold/end_of_body.html"
+
     def __init__(self, force_normal_include=False):
         '''
         @head_js - a collection of javascript src files

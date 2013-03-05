@@ -44,13 +44,13 @@ And lastly, in your base template you'll need to include these templates:
 ```html
 <head>
     ...
-    {% include "scaffold/head.html" %}
+    {% include "asset_bender/scaffold/head.html" %}
     ...
 </head>
 
 <body>
     ...
-    {% include "scaffold/end_of_body.html" %}
+    {% include "asset_bender/scaffold/end_of_body.html" %}
 </body>
 ```
 
