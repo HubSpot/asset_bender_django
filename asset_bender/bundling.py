@@ -5,6 +5,8 @@ import os
 import re
 import socket
 import traceback
+from itertools import izip_longest
+
 try:
     import simplejson as json
 except ImportError:
@@ -650,6 +652,10 @@ class Scaffold(object):
     # js files that append link/style blocks later.
     MAX_IE_CSS_INCLUDES = 20
 
+    # Also, if that isn't fun enough, there is a max number of @imports in a
+    # single <style> element: http://blogs.msdn.com/b/ieinternals/archive/2011/05/14/internet-explorer-stylesheet-rule-selector-import-sheet-limit-maximum.aspx
+    MAX_IMPORTS_PER_STYLE_ELEMENT = 25
+
     head_template = "asset_bender/scaffold/head.html"
     end_of_body_template = "asset_bender/scaffold/end_of_body.html"
 
@@ -709,9 +715,33 @@ class Scaffold(object):
         else:
             return "\n".join(self.head_css[:self.MAX_IE_CSS_INCLUDES])
 
-    def header_forced_import_css_html(self):
-        if self.total_css_files() > self.MAX_IE_CSS_INCLUDES and not self.force_normal_include:
-            return "\n".join(map(self._convert_link_to_import, self.head_css[self.MAX_IE_CSS_INCLUDES:]))
+    def has_excess_stylesheets_for_IE(self):
+        return self.total_css_files() > self.MAX_IE_CSS_INCLUDES and not self.force_normal_include
+
+    def header_forced_import_css_html_for_IE(self):
+        """
+        Get all of the excess css links that wouldn't work in IE and breaks them
+        into @imports in a separate <style> element.
+
+        Also chunks things so there are less than 30 @imports per <style> element
+        (oh IE...)
+        """
+
+        if self.has_excess_stylesheets_for_IE():
+
+            # Convert all the excess <link> elements into @imports
+            import_lines = map(self._convert_link_to_import, self.head_css[self.MAX_IE_CSS_INCLUDES:])
+
+            # Chunk those @imports by MAX_IMPORTS_PER_STYLE_ELEMENT, and then
+            # turn each chunk into a single string separated by newlines
+            chunked_import_lines = chunk(self.MAX_IMPORTS_PER_STYLE_ELEMENT, import_lines)
+            chunked_import_lines = ['\n'.join(filter(None, lines)) for lines in chunked_import_lines]
+
+            # Join together into <style> tags
+            result = '\n\n'.join(["<style>\n%s\n</style>" % c for c in chunked_import_lines])
+
+            return result
+
         else:
             return ""
 
@@ -799,3 +829,8 @@ def _extract_project_name_from_path(path_or_url):
     else:
         return None    
 
+
+# Via http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks-in-python
+def chunk(n, iterable, padvalue=None):
+    "chunk(3, 'abcdefg', 'x') --> ('a','b','c'), ('d','e','f'), ('g','x','x')"
+    return izip_longest(*[iter(iterable)]*n, fillvalue=padvalue)

@@ -2,10 +2,8 @@
   <!-- ASSET BENDER HEADER CSS -->
   {{ bender_scaffold.header_css_html|safe }}
 
-  {% if bender_scaffold.header_forced_import_css_html %}
-    <style>
-      {{ bender_scaffold.header_forced_import_css_html|safe }} 
-    </style>
+  {% if bender_scaffold.has_excess_stylesheets_for_IE %}
+      {{ bender_scaffold.header_forced_import_css_html_for_IE|safe }} 
   {% endif %}
 
   <!-- ASSET BENDER HEADER JS -->
