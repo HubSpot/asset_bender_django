@@ -36,6 +36,8 @@ STATIC_DOMAIN_CONTEXT_NAME = 'bender_domain'
 FORCE_BUILD_PARAM_PREFIX = "forceBuildFor-"
 HOST_NAME = socket.gethostname()
 
+LOG_CACHE_MISSES = True
+
 def build_scaffold(request, included_bundles):
     return BenderAssets(included_bundles, request.GET).generate_scaffold()
 
@@ -147,6 +149,9 @@ class BenderAssets(object):
         if not self.use_local_daemon and not self.skip_scaffold_cache:
             scaffold = scaffold_cache.get(scaffold_key=cache_key)
 
+            if not scaffold and LOG_CACHE_MISSES:
+                logger.debug("Asset Bender scaffold cache miss: %s" % cache_key)
+
         if not scaffold:
             scaffold = self._generate_scaffold_without_cache()
 
@@ -202,8 +207,7 @@ class BenderAssets(object):
 
     def invalidate_scaffold_cache(self):
         cache_key = self._get_scaffold_cache_key()
-        scaffold_cache.invalidate('bender_scaffold_for_project:scaffold_key', 
-                                  scaffold_key=cache_key)
+        scaffold_cache.invalidate('bender_scaffold_for_project:scaffold_key', scaffold_key=cache_key)
 
     def get_bender_asset_url(self, full_asset_path):
         '''
@@ -488,23 +492,33 @@ class S3BundleFetcher(BundleFetcherBase):
 
     def _fetch_build_version(self, project_name):
         build_version = self._fetch_local_project_build_version(project_name)
+
         if build_version:
             return build_version
+
         build_version = self.per_request_project_build_version_cache.get(project_name)
+
         if build_version:
             return build_version
         elif build_version:
             build_version = project_version_cache.get(
                 project=project_name,
                 host_project=self.host_project_name)
+
+            if not scaffold and LOG_CACHE_MISSES:
+                logger.debug("Asset Bender build version cache miss: %s from %s" % (project_name, self.host_project_name))
+
         if not build_version:
             build_version = self._fetch_build_version_without_cache(project_name)
+
         if not build_version:
             raise BundleException("Could not find a build version for %s" % project_name)
+
         project_version_cache.set(
             build_version, 
             project=project_name, 
             host_project=self.host_project_name)
+
         self.per_request_project_build_version_cache[project_name] = build_version
         return build_version
     
