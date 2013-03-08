@@ -493,24 +493,28 @@ class S3BundleFetcher(BundleFetcherBase):
         return match.group(1), hardcoded_version, match.group(3)
 
     def _fetch_build_version(self, project_name):
+        # Are there any fixed local versions?
         build_version = self._fetch_local_project_build_version(project_name)
 
         if build_version:
             return build_version
 
+        # Next, try the per-request mini-cache
         build_version = self.per_request_project_build_version_cache.get(project_name)
 
         if build_version:
             return build_version
-        elif build_version:
-            build_version = project_version_cache.get(
-                project=project_name,
-                host_project=self.host_project_name)
 
-            if not scaffold and LOG_CACHE_MISSES:
-                logger.debug("Asset Bender build version cache miss: %s from %s" % (project_name, self.host_project_name))
+        # Try memcache
+        build_version = project_version_cache.get(
+            project=project_name,
+            host_project=self.host_project_name)
 
         if not build_version:
+            if LOG_CACHE_MISSES:
+                logger.debug("Asset Bender build version cache miss: %s from %s" % (project_name, self.host_project_name))
+
+            # Next try fetching directly from s3
             build_version = self._fetch_build_version_without_cache(project_name)
 
         if not build_version:
