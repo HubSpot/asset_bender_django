@@ -16,7 +16,7 @@ try:
     from hubspot.hsutils import get_setting, get_setting_default
 except ImportError:
     from hscacheutils.setting_wrappers import get_setting, get_setting_default
-    
+
 from hscacheutils.raw_cache import MAX_MEMCACHE_TIMEOUT
 from hscacheutils.generational_cache import CustomUseGenCache, DummyGenCache
 
@@ -47,7 +47,7 @@ def build_scaffold(request, included_bundles):
 def get_static_url(full_asset_path, template_context=None, bender_assets=None):
     '''
     Gets an absolute url with the correct build version for an asset of the given project name.
-    
+
     Re-uses the BenderAssets instance on the template context so that we only have to hit memcached
     for the build versions once per request (or you can manually pass in an instance).
     '''
@@ -171,7 +171,7 @@ class BenderAssets(object):
         # of the static bundles that is ahead of nodes that have not recieved a deploy yet
         # we include the __file__ name so that every deploy will clear the cache (since it will have a new virtuvalenv path)
         args = self.included_bundle_paths + [self.host_project_name] + [str(self.is_debug)] + [str(self.use_local_daemon)] \
-               + [HOST_NAME] + [__file__] 
+               + [HOST_NAME] + [__file__]
 
         long_key = '-'.join(args)
         key = hashlib.md5(long_key).hexdigest()
@@ -180,7 +180,7 @@ class BenderAssets(object):
     def _generate_scaffold_without_cache(self):
         self._validate_configuration()
         scaffold = Scaffold()
-        
+
         for bundle_path in self.included_bundle_paths:
             self._add_bundle_to_scaffold(bundle_path, scaffold)
 
@@ -216,7 +216,7 @@ class BenderAssets(object):
         '''
         Builds a URL to the particulr CSS, JS, IMG, or other file that is
         part of project_name.  The URL includes the proper domain and build information.
-        
+
         '''
         project_name = _extract_project_name_from_path(full_asset_path)
         if not project_name:
@@ -230,7 +230,7 @@ class BenderAssets(object):
 
         if extension in PRECOMPILED_EXTENSIONS:
             message = "You cannot use the '%s' extension in this static path: %s.\n You must use 'js' or 'css' (It will work locally, but it won't work on QA/prod)." % (extension, full_asset_path)
-    
+
             if get_setting('ENV') == 'prod':
                 logger.error(message)
             else:
@@ -241,7 +241,7 @@ class BenderAssets(object):
             return self.local_daemon_fetcher.get_asset_url(project_name, asset_path)
         else:
             return self.s3_fetcher.get_asset_url(project_name, asset_path)
-    
+
     def get_dependency_version_snapshot(self):
         '''
         Called by a special endpoint on QA by the deploy script.  Generates a snapshot
@@ -252,7 +252,7 @@ class BenderAssets(object):
 
     def _validate_configuration(self):
         if not self.host_project_name:
-            raise Exception("You must hav PROJ_NAME set to your project name in settings.py (eg: PROJ_NAME = \"example_app_whatever...\") !")            
+            raise Exception("You must hav PROJ_NAME set to your project name in settings.py (eg: PROJ_NAME = \"example_app_whatever...\") !")
 
         for bundle_path in self.included_bundle_paths:
             extension = _find_extension(bundle_path)
@@ -322,7 +322,7 @@ class BenderAssets(object):
                 self.skip_scaffold_cache = True
 
         if len(forced_build_version_by_project):
-            return forced_build_version_by_project        
+            return forced_build_version_by_project
 
     def get_domain(self):
         if self.use_local_daemon:
@@ -344,7 +344,7 @@ class BundleFetcherBase(object):
         self.is_debug = is_debug
         self.project_directory = get_setting('PROJ_DIR')
 
-        # We store the build versions locally in this object so we don't have to 
+        # We store the build versions locally in this object so we don't have to
         # hit memcached dozens of times per request every time we call get_asset_url.
         self.per_request_project_build_version_cache = {}
         self._add_forced_versions_to_per_request_cache(forced_build_version_by_project)
@@ -384,8 +384,8 @@ class BundleFetcherBase(object):
 class LocalDaemonBundleFetcher(BundleFetcherBase):
     def fetch_include_html(self, bundle_path):
         url = "http://%s/bundle%s/%s.html?from=%s" % \
-            (self.get_domain(), 
-             '-expanded' if self.is_debug else '', 
+            (self.get_domain(),
+             '-expanded' if self.is_debug else '',
              bundle_path,
              self.host_project_name
              )
@@ -424,7 +424,7 @@ class LocalDaemonBundleFetcher(BundleFetcherBase):
 
     def _fetch_build_version_from_daemon(self, project_name):
         url = "http://%s/builds/%s?from=%s" % \
-            (self.get_domain(), 
+            (self.get_domain(),
              project_name,
              self.host_project_name)
 
@@ -478,7 +478,7 @@ class S3BundleFetcher(BundleFetcherBase):
         # the major version pointer
         if str(pointer).isdigit():
             pointer = 'latest-version-%s' % str(pointer)
-            
+
         url = 'http://%s/%s/%s' % (self._get_non_cdn_domain(), project_name, pointer)
         if get_setting('ENV') not in ('prod',):
             url += '-qa'
@@ -525,13 +525,13 @@ class S3BundleFetcher(BundleFetcherBase):
             raise BundleException("Could not find a build version for %s" % project_name)
 
         project_version_cache.set(
-            build_version, 
-            project=project_name, 
+            build_version,
+            project=project_name,
             host_project=self.host_project_name)
 
         self.per_request_project_build_version_cache[project_name] = build_version
         return build_version
-    
+
     def _fetch_local_project_build_version(self, project_name):
         '''
         If this bundle_path is being included from the project we are currently running in,
@@ -554,7 +554,7 @@ class S3BundleFetcher(BundleFetcherBase):
         prebuilt_build_version = self._get_prebuilt_version(project_name)
         frozen_by_deploy_version = self._get_frozen_at_deploy_version(project_name)
         build_version = self._maximum_version_of(
-            pointer_build_version, 
+            pointer_build_version,
             prebuilt_build_version,
             frozen_by_deploy_version)
 
@@ -562,7 +562,7 @@ class S3BundleFetcher(BundleFetcherBase):
             logger.info("Fetched static version for %(project_name)s: %(build_version)s (max of %(pointer_build_version)s, %(prebuilt_build_version)s, and %(frozen_by_deploy_version)s)")
 
         return build_version
-         
+
     def _get_version_from_static_conf(self, project_name):
         deps = self._get_static_conf_data().get('deps', {})
 
@@ -618,7 +618,7 @@ class S3BundleFetcher(BundleFetcherBase):
         '''
         path = os.path.join(self.project_directory, 'static/frozen_at_deploy_version_snapshot.json')
         return _load_json_file_with_cache(path).get(project_name, '')
-        
+
     def _maximum_version_of(self, *args):
         args = [a for a in args if a]
         return sorted(args, cmp=self._compare_build_names).pop()
@@ -714,7 +714,7 @@ class Scaffold(object):
 
         # JS only for IE
         html += """
-        """ 
+        """
 
         return html
 
@@ -839,7 +839,7 @@ def _extract_project_name_from_path(path_or_url):
     if match:
         return match.group(1)
     else:
-        return None    
+        return None
 
 
 # Via http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks-in-python
