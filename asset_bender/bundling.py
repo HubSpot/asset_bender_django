@@ -448,7 +448,7 @@ class S3BundleFetcher(BundleFetcherBase):
             '-expanded' if self.is_debug else '')
 
         if LOG_S3_FETCHES:
-            logger.info("Fetching the bundle html (static versions) for %(bundle_path)s")
+            logger.info("Fetching the bundle html (static versions) for %(bundle_path)s" % locals)
 
         result = fetch_ab_url_with_retries(url, timeouts=[1,2,5])
         return self._append_static_domain_to_links(result.text)
@@ -559,7 +559,7 @@ class S3BundleFetcher(BundleFetcherBase):
             frozen_by_deploy_version)
 
         if LOG_S3_FETCHES:
-            logger.info("Fetched static version for %(project_name)s: %(build_version)s (max of %(pointer_build_version)s, %(prebuilt_build_version)s, and %(frozen_by_deploy_version)s)")
+            logger.info("Fetched static version for %(project_name)s: %(build_version)s (max of %(pointer_build_version)s, %(prebuilt_build_version)s, and %(frozen_by_deploy_version)s)" % locals)
 
         return build_version
 
