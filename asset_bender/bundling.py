@@ -585,7 +585,7 @@ class S3BundleFetcher(BundleFetcherBase):
         url = self.make_url_to_pointer(pointer, project_name)
         result = fetch_ab_url_with_retries(url, timeouts=[1, 2, 5])
 
-        if result.content is None or not result.text:
+        if not result.text:
             self._check_for_fetch_html_errors_and_raise_exception(result, url)
             raise AssetBenderException("Invalid version file (empty) from: %s" % url)
 
