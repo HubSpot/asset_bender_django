@@ -38,7 +38,8 @@ STATIC_DOMAIN_CONTEXT_NAME = 'bender_domain'
 FORCE_BUILD_PARAM_PREFIX = "forceBuildFor-"
 HOST_NAME = socket.gethostname()
 
-LOG_CACHE_MISSES = True
+LOG_CACHE_MISSES = get_setting_default('BENDER_LOG_CACHE_MISSES', True)
+LOG_S3_FETCHES = get_setting_default('BENDER_LOG_S3_FETCHES', False)
 
 def build_scaffold(request, included_bundles):
     return BenderAssets(included_bundles, request.GET).generate_scaffold()
@@ -446,6 +447,9 @@ class S3BundleFetcher(BundleFetcherBase):
             bundle_postfix_path,
             '-expanded' if self.is_debug else '')
 
+        if LOG_S3_FETCHES:
+            logger.info("Fetching the bundle html (static versions) for %(bundle_path)s")
+
         result = fetch_ab_url_with_retries(url, timeouts=[1,2,5])
         return self._append_static_domain_to_links(result.text)
 
@@ -553,6 +557,10 @@ class S3BundleFetcher(BundleFetcherBase):
             pointer_build_version, 
             prebuilt_build_version,
             frozen_by_deploy_version)
+
+        if LOG_S3_FETCHES:
+            logger.info("Fetched static version for %(project_name)s: %(build_version)s (max of %(pointer_build_version)s, %(prebuilt_build_version)s, and %(frozen_by_deploy_version)s)")
+
         return build_version
          
     def _get_version_from_static_conf(self, project_name):
