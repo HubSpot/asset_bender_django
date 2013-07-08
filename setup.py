@@ -15,7 +15,7 @@ setup(
     include_package_data=True,
     install_requires=[
         'django>=1.3.0',
-        'hscacheutils<=1.0.0',
+        'hscacheutils>=0.1.6',
         'requests>=1.1.0',
     ],
 )
