@@ -226,7 +226,7 @@ class BenderAssets(object):
         asset_path = full_asset_path.replace("%s/static/" % project_name, '')
 
         # Make sure the path doesn't refer to a precompiled extension (since that won't actually exist on s3)
-        extension = _find_extension(full_asset_path)
+        extension = _find_extension(full_asset_path, also_search_folder_name=False)
 
         if extension in PRECOMPILED_EXTENSIONS:
             message = "You cannot use the '%s' extension in this static path: %s.\n You must use 'js' or 'css' (It will work locally, but it won't work on QA/prod)." % (extension, full_asset_path)
@@ -255,10 +255,13 @@ class BenderAssets(object):
             raise Exception("You must hav PROJ_NAME set to your project name in settings.py (eg: PROJ_NAME = \"example_app_whatever...\") !")
 
         for bundle_path in self.included_bundle_paths:
-            extension = _find_extension(bundle_path)
+            extension = _find_extension(bundle_path, also_search_folder_name=False)
 
-            if extension in PRECOMPILED_EXTENSIONS:
-                raise Exception("You cannot use the '%s' extension in a bundle path, you must use 'js' or 'css' (It can work locally, but it won't work on QA/prod)." % extension)
+            if not extension:
+                raise Exception("You must include an extension in this static path: %s.\n The file must end in 'js' or 'css' (It will work locally, but it won't work on QA/prod)." % (bundle_path))
+
+            elif extension in PRECOMPILED_EXTENSIONS:
+                raise Exception("You cannot use the '%s' extension in a bundle path (%s), you must use 'js' or 'css' (It can work locally, but it won't work on QA/prod)." % (bundle_path, extension))
 
     def _check_use_local_daemon_for_project(self, bundle_path):
         if not get_setting_default('BENDER_LOCAL_PROJECT_MODE', False):
@@ -811,14 +814,14 @@ If you have any questions, you can bug tfinley@hubspot.com.
 
 path_extension_regex = re.compile(r'/(css|sass|scss|coffee|js)/')
 
-def _find_extension(filename):
+def _find_extension(filename, also_search_folder_name=True):
     extension = os.path.splitext(filename)[1]
     # If there was an extension at the end of the file, grab it
     # and strip off the leading period
     if extension:
         extension = extension[1:]
     # Otherwise look for /<ext>/ in the path
-    else:
+    elif also_search_folder_name:
         match = path_extension_regex.search(filename)
         if match:
             extension = match.group(1)
