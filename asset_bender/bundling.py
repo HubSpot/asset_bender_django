@@ -51,7 +51,14 @@ def get_static_url(full_asset_path, template_context=None, bender_assets=None):
     Re-uses the BenderAssets instance on the template context so that we only have to hit memcached
     for the build versions once per request (or you can manually pass in an instance).
     '''
+    bender_assets = _extract_bender_assets_instance_from_template_context(template_context, bender_assets)
+    return bender_assets.get_bender_asset_url(full_asset_path)
 
+def load_static_json_content(full_asset_path, template_context=None, bender_assets=None):
+    bender_assets = _extract_bender_assets_instance_from_template_context(template_context, bender_assets)
+    return bender_assets.fetch_bender_asset_contents(full_asset_path)
+
+def _extract_bender_assets_instance_from_template_context(template_context, bender_assets=None):
     if template_context == None and bender_assets == None:
         logger.warning("No template_context or bender_assets instance passed, that will probably cause lots of excess memcache requests")
     elif bender_assets == None:
@@ -61,9 +68,10 @@ def get_static_url(full_asset_path, template_context=None, bender_assets=None):
         bender_assets = BenderAssets()
 
     if template_context and not template_context.get(BENDER_ASSETS_CONTEXT_NAME):
-        template_context.get(BENDER_ASSETS_CONTEXT_NAME, bender_assets)
+        template_context.set(BENDER_ASSETS_CONTEXT_NAME, bender_assets)
 
-    return bender_assets.get_bender_asset_url(full_asset_path)
+    return bender_assets
+
 
 def _is_only_on_qa():
     return get_setting('ENV') == 'qa'
@@ -241,6 +249,14 @@ class BenderAssets(object):
             return self.local_daemon_fetcher.get_asset_url(project_name, asset_path)
         else:
             return self.s3_fetcher.get_asset_url(project_name, asset_path)
+
+    # This assumes that the build process has placed the precompiled file in the
+    # python egg for QA/prod
+    def fetch_bender_asset_contents(self, full_asset_path):
+        if self.use_local_daemon:
+            return self.local_daemon_fetcher.fetch_static_file_contents(full_asset_path)
+        else:
+            return self.s3_fetcher.fetch_static_file_contents(full_asset_path)
 
     def get_dependency_version_snapshot(self):
         '''
@@ -433,6 +449,11 @@ class LocalDaemonBundleFetcher(BundleFetcherBase):
 
         result = fetch_ab_url_with_retries(url, timeouts=[1, 2, 5])
         return result.text
+
+    def fetch_static_file_contents(self, static_path):
+        url = "http://%s/%s" % (self.get_domain(), static_path)
+        result = fetch_ab_url_with_retries(url, timeouts=[1, 2, 5])
+        return json.loads(result.text)
 
 class S3BundleFetcher(BundleFetcherBase):
     def fetch_include_html(self, bundle_path):
@@ -654,6 +675,12 @@ class S3BundleFetcher(BundleFetcherBase):
         When downloading the version pointer, we need to skip the CDN and go direct to avoid problems with caching
         '''
         return get_setting_default('BENDER_S3_DOMAIN', 'hubspot-static2cdn.s3.amazonaws.com')
+
+    # Assumes that the build has placed the precomplied file in the python egg
+    # (oh and that it is a JSON file)
+    def fetch_static_file_contents(self, static_path):
+        filename = os.path.basename(static_path)
+        return _load_json_file_with_cache(filename)
 
 
 class Scaffold(object):
