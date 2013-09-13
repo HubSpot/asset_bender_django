@@ -85,18 +85,18 @@ def _is_only_on_qa():
 
 # This will force different cache keys per build, which is desirable,
 # because new builds may have different versions set in static_conf.json
-_key_base = os.environ.get('BUILD_NUM', None) or os.environ.get('HS_JENKINS_BUILD_NUM', '')
+_key_base = os.environ.get('BUILD_NUM', '') or os.environ.get('HS_JENKINS_BUILD_NUM', '')
 
 project_version_cache = CustomUseGenCache([
     'static_build_name_for:project',
-    'static_deps_for_project:host_project'
+    'static_deps_for_project:host_project',
     'static_deps_for_project_%s:host_project' % _key_base
     ],
     timeout=MAX_MEMCACHE_TIMEOUT)
 
 scaffold_cache = CustomUseGenCache([
     'bender_all_scaffolds',
-    'bender_scaffold_for_project:scaffold_key'
+    'bender_scaffold_for_project:scaffold_key',
     'static3_scaffold_for_project_%s:scaffold_key' % _key_base
     ],
     timeout=MAX_MEMCACHE_TIMEOUT)
