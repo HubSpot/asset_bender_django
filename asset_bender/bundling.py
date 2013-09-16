@@ -38,8 +38,14 @@ STATIC_DOMAIN_CONTEXT_NAME = 'bender_domain'
 FORCE_BUILD_PARAM_PREFIX = "forceBuildFor-"
 HOST_NAME = socket.gethostname()
 
-LOG_CACHE_MISSES = get_setting_default('BENDER_LOG_CACHE_MISSES', True)
-LOG_S3_FETCHES = get_setting_default('BENDER_LOG_S3_FETCHES', False)
+def get_bender_or_static3_setting(setting_name, default_value):
+    static3_setting_name = setting_name.replace('BENDER_', 'STATIC3_')
+    return get_setting_default(setting_name, get_setting_default(static3_setting_name, default_value))
+
+
+LOG_CACHE_MISSES = get_bender_or_static3_setting('BENDER_LOG_CACHE_MISSES', True)
+LOG_S3_FETCHES = get_bender_or_static3_setting('BENDER_LOG_S3_FETCHES', True)
+
 
 def build_scaffold(request, included_bundles):
     return BenderAssets(included_bundles, request.GET).generate_scaffold()
@@ -76,19 +82,26 @@ def _extract_bender_assets_instance_from_template_context(template_context, bend
 def _is_only_on_qa():
     return get_setting('ENV') == 'qa'
 
+
+# This will force different cache keys per build, which is desirable,
+# because new builds may have different versions set in static_conf.json
+_key_base = os.environ.get('BUILD_NUM', None) or os.environ.get('HS_JENKINS_BUILD_NUM', '')
+
 project_version_cache = CustomUseGenCache([
     'static_build_name_for:project',
     'static_deps_for_project:host_project'
+    'static_deps_for_project_%s:host_project' % _key_base
     ],
     timeout=MAX_MEMCACHE_TIMEOUT)
 
 scaffold_cache = CustomUseGenCache([
     'bender_all_scaffolds',
     'bender_scaffold_for_project:scaffold_key'
+    'static3_scaffold_for_project_%s:scaffold_key' % _key_base
     ],
     timeout=MAX_MEMCACHE_TIMEOUT)
 
-if get_setting_default('BENDER_NO_CACHE', False):
+if get_bender_or_static3_setting('BENDER_NO_CACHE', False):
     project_version_cache = DummyGenCache()
     scaffold_cache = DummyGenCache()
 
@@ -118,7 +131,7 @@ class BenderAssets(object):
 
         # Used for the cases when you don't want to include the default bundles (style_guide)
         if not exclude_default_bundles:
-            self.included_bundle_paths.extend(get_setting_default('DEFAULT_ASSET_BENDER_BUNDLES', []))
+            self.included_bundle_paths.extend(get_setting_default('DEFAULT_ASSET_BENDER_BUNDLES', get_setting_default('DEFAULT_BUNDLES_V3', [])))
 
         self.included_bundle_paths.extend(bundle_paths)
 
@@ -131,7 +144,7 @@ class BenderAssets(object):
         self.s3_fetcher = S3BundleFetcher(self.host_project_name, self.is_debug, forced_build_version_by_project)
         is_local_debug = self.is_debug
 
-        if get_setting_default('BENDER_LOCAL_PROJECT_MODE', False):
+        if get_bender_or_static3_setting('BENDER_LOCAL_PROJECT_MODE', False):
             is_local_debug = True
 
         self.local_daemon_fetcher = LocalDaemonBundleFetcher(self.host_project_name, is_local_debug, forced_build_version_by_project)
@@ -280,14 +293,14 @@ class BenderAssets(object):
                 raise Exception("You cannot use the '%s' extension in a bundle path (%s), you must use 'js' or 'css' (It can work locally, but it won't work on QA/prod)." % (bundle_path, extension))
 
     def _check_use_local_daemon_for_project(self, bundle_path):
-        if not get_setting_default('BENDER_LOCAL_PROJECT_MODE', False):
+        if not get_bender_or_static3_setting('BENDER_LOCAL_PROJECT_MODE', False):
             return False
         if bundle_path.startswith(self.host_project_name + '/'):
             return True
         return False
 
     def _check_use_local_daemon(self, request):
-        use_local = get_setting_default('BENDER_LOCAL_MODE', None)
+        use_local = get_bender_or_static3_setting('BENDER_LOCAL_MODE', None)
         if use_local != None:
             return use_local
         if get_setting('ENV') in ('local',):
@@ -303,11 +316,11 @@ class BenderAssets(object):
         if hs_debug:
             return hs_debug != 'false'
 
-        local_mode = get_setting_default('BENDER_LOCAL_MODE', None)
+        local_mode = get_bender_or_static3_setting('BENDER_LOCAL_MODE', None)
         if local_mode != None:
             return local_mode
 
-        debug_mode = get_setting_default('BENDER_DEBUG_MODE', None)
+        debug_mode = get_bender_or_static3_setting('BENDER_DEBUG_MODE', None)
         if debug_mode != None:
             return debug_mode
 
@@ -425,7 +438,7 @@ class LocalDaemonBundleFetcher(BundleFetcherBase):
         return url
 
     def get_domain(self):
-        return get_setting_default('BENDER_DAEMON_DOMAIN', 'localhost:3333')
+        return get_bender_or_static3_setting('BENDER_DAEMON_DOMAIN', 'localhost:3333')
 
     def _fetch_build_version(self, project_name):
         """
@@ -668,13 +681,13 @@ class S3BundleFetcher(BundleFetcherBase):
           return cmp(x[1], y[1])
 
     def get_domain(self):
-        return get_setting_default('BENDER_CDN_DOMAIN', 'static2cdn.hubspot.com')
+        return get_bender_or_static3_setting('BENDER_CDN_DOMAIN', 'static2cdn.hubspot.com')
 
     def _get_non_cdn_domain(self):
         '''
         When downloading the version pointer, we need to skip the CDN and go direct to avoid problems with caching
         '''
-        return get_setting_default('BENDER_S3_DOMAIN', 'hubspot-static2cdn.s3.amazonaws.com')
+        return get_bender_or_static3_setting('BENDER_S3_DOMAIN', 'hubspot-static2cdn.s3.amazonaws.com')
 
     # Assumes that the build has placed the precomplied file in the python egg
     # (oh and that it is a JSON file)
@@ -816,7 +829,7 @@ def _load_json_file_with_cache(path, throw_exception_if=None):
         return _file_json_cache[path]
 
     if not os.path.isfile(path):
-        if hasattr(throw_exception_if, '__call__') and throw_exception_if() and not get_setting_default('BENDER_QA_EMULATION', False):
+        if hasattr(throw_exception_if, '__call__') and throw_exception_if() and not get_bender_or_static3_setting('BENDER_QA_EMULATION', False):
             raise IOError("""
 Couldn't find the prebuilt static dependencies file at: %s
 You should double check that your static and jenkins config are correct. And that you have these lines in your Manifest.in:
