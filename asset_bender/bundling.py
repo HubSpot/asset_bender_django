@@ -112,7 +112,8 @@ def invalidate_cache_for_deploy(project_name):
     the latest front-end code).
     '''
     project_version_cache.invalidate('static_build_name_for:project', project=project_name)
-    project_version_cache.invalidate('static_deps_for_project:host_project', host_project=project_name)
+    project_version_cache.invalidate('static_deps_for_project:host_project', host_project=project_name)  # For backwards compatibility
+    project_version_cache.invalidate('static_deps_for_project_%s:host_project' % _key_base, host_project=project_name)
     scaffold_cache.invalidate('bender_all_scaffolds')
 
 
