@@ -228,7 +228,7 @@ class BenderAssets(object):
             if html:
                 scaffold.add_html_by_file_name(bundle_path, html)
             else:
-                logger.error("Unknown bundle couldn't be added to scaffold: " % bundle_path)
+                logger.error("Unknown bundle couldn't be added to scaffold: %s" % bundle_path)
 
     def invalidate_scaffold_cache(self):
         cache_key = self._get_scaffold_cache_key()
