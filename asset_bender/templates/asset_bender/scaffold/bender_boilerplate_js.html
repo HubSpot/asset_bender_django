@@ -1,0 +1,15 @@
+{% load json_filter %}
+{% load asset_bender_tags %}
+
+<script type="text/javascript" language="javascript">
+  hns('hubspot.bender', {
+    staticDomain: '{{ bender_domain }}' || '{{ static_v3_domain }}' || window.location.host,
+    staticDomainPrefix: '{{ bender_domain_with_prefix }}' || '{{ static_v3_domain_with_prefix }}' || ('//' + window.location.host),
+
+    currentProject: '{{ host_project_name }}',
+    currentProjectVersion: '{% bender_build_for host_project_name %}',
+
+    depVersions: {{ bender_assets_instance.get_all_dependency_versions|json }},
+    depPathPrefixes: {{ bender_assets_instance.get_all_dependency_url_prefixes|json }}
+  });
+</script>

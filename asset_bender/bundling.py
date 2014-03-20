@@ -34,6 +34,8 @@ TAG_FUNCTION_NAME = 'bender_asset_url_callback'
 SCAFFOLD_CONTEXT_NAME = 'bender_scaffold'
 BENDER_ASSETS_CONTEXT_NAME = 'bender_assets_instance'
 STATIC_DOMAIN_CONTEXT_NAME = 'bender_domain'
+STATIC_DOMAIN_WITH_PREFIX_CONTEXT_NAME = 'bender_domain_with_prefix'
+HOST_PROJECT_CONTEXT_NAME = 'host_project_name'
 
 FORCE_BUILD_PARAM_PREFIX = "forceBuildFor-"
 HOST_NAME = socket.gethostname()
@@ -63,6 +65,10 @@ def get_static_url(full_asset_path, template_context=None, bender_assets=None):
 def load_static_json_content(full_asset_path, template_context=None, bender_assets=None):
     bender_assets = _extract_bender_assets_instance_from_template_context(template_context, bender_assets)
     return bender_assets.fetch_bender_asset_contents(full_asset_path)
+
+def get_static_build_version(project_name, template_context=None, bender_assets=None):
+    bender_assets = _extract_bender_assets_instance_from_template_context(template_context, bender_assets)
+    return bender_assets.get_static3_build_version(project_name)
 
 def _extract_bender_assets_instance_from_template_context(template_context, bender_assets=None):
     if template_context == None and bender_assets == None:
@@ -158,6 +164,8 @@ class BenderAssets(object):
             SCAFFOLD_CONTEXT_NAME: self.generate_scaffold(),
             STATIC_DOMAIN_CONTEXT_NAME: self.get_domain(),
             BENDER_ASSETS_CONTEXT_NAME: self,
+            STATIC_DOMAIN_WITH_PREFIX_CONTEXT_NAME: self.get_prefixed_domain(),
+            HOST_PROJECT_CONTEXT_NAME: self.host_project_name,
         }
 
     def generate_scaffold(self):
@@ -264,6 +272,13 @@ class BenderAssets(object):
         else:
             return self.s3_fetcher.get_asset_url(project_name, asset_path)
 
+    def get_static3_build_version(self, project_name):
+        # Dispatch to the correct fetcher
+        if self.use_local_daemon:
+            return self.local_daemon_fetcher._fetch_build_version(project_name)
+        else:
+            return self.s3_fetcher._fetch_build_version(project_name)
+
     # This assumes that the build process has placed the precompiled file in the
     # python egg for QA/prod
     def fetch_bender_asset_contents(self, full_asset_path):
@@ -292,6 +307,35 @@ class BenderAssets(object):
 
             elif extension in PRECOMPILED_EXTENSIONS:
                 raise Exception("You cannot use the '%s' extension in a bundle path (%s), you must use 'js' or 'css' (It can work locally, but it won't work on QA/prod)." % (bundle_path, extension))
+
+    def get_all_dependency_versions(self):
+        '''
+        Similar to `get_dependency_version_snapshot`, but doesn't only use the s3 fetcher
+        and automatically adds "-debug" if in ?hsDebug=true and prod/QA
+        '''
+        if self.use_local_daemon:
+            dep_versions = self.local_daemon_fetcher._fetch_all_dependency_versions()
+        else:
+            dep_versions = self.s3_fetcher._fetch_all_dependency_versions()
+
+        if self.is_debug and not self.use_local_daemon:
+            for dep, version in dep_versions.items():
+                dep_versions[dep] = version + "-debug"
+
+        return dep_versions
+
+    def get_all_dependency_url_prefixes(self):
+        '''
+        Similar to `get_dependency_version_snapshot`, but appends "/<project>/static-" to each
+        version so it is ready to be directly inserted into an URL
+        '''
+        dep_versions_with_static = self.get_all_dependency_versions()
+        dep_versions_with_prefix = {}
+
+        for dep, version in dep_versions_with_static.items():
+            dep_versions_with_prefix[dep] = "/" + dep + "/" + version
+
+        return dep_versions_with_prefix
 
     def _check_use_local_daemon_for_project(self, bundle_path):
         if not get_bender_or_static3_setting('BENDER_LOCAL_PROJECT_MODE', False):
@@ -363,6 +407,12 @@ class BenderAssets(object):
         else:
             return self.s3_fetcher.get_domain()
 
+    def get_prefixed_domain(self):
+        if self.use_local_daemon:
+           return self.local_daemon_fetcher.get_prefixed_domain()
+        else:
+            return self.s3_fetcher.get_prefixed_domain()
+
 class BundleFetcherBase(object):
     '''
     Base class from getting included assets from either the local Asset Bender server or S3
@@ -391,6 +441,17 @@ class BundleFetcherBase(object):
     def get_domain(self):
         raise NotImplementedError("Implement me in a subclass")
 
+    def get_prefixed_domain(self):
+        domain = self.get_domain()
+
+        if domain:
+            if domain.startswith('//') or domain.startswith('http:') or domain.startswith('https:'):
+                return domain
+            else:
+                return "//" + domain
+        else:
+            return domain
+
     def _append_static_domain_to_links(self, html):
         # Use the CDN domain instead of directly pointing to the s3 domain.
         # Only doing the switch at this point because the rest of the build fetching code
@@ -413,6 +474,32 @@ class BundleFetcherBase(object):
     def _is_specific_build_name(self, build_name):
        return isinstance(build_name, basestring) and build_name.startswith('static-')
 
+    def _fetch_all_dependency_versions(self):
+        project_name_to_version = {}
+        project_names = self._get_static_conf_data().get('deps', {}).keys() + [self.host_project_name]
+        for project_name in project_names:
+            version = self._fetch_build_version(project_name)
+            project_name_to_version[project_name] = version
+        return project_name_to_version
+
+    def _get_version_from_static_conf(self, project_name):
+        deps = self._get_static_conf_data().get('deps', {})
+
+        if not deps.get(project_name):
+            logger.error("Tried to find a dependency (%s) in static_conf.json, but it didn't exist. Your static_conf.json must include all the static dependencies that your project may reference." % project_name)
+
+        return deps.get(project_name, 'current')
+
+    def _get_static_conf_data(self):
+        path = os.path.join(self.project_directory, 'static/static_conf.json')
+        parents_path = os.path.join(self.project_directory, '../static/static_conf.json')
+
+        if os.path.isfile(path):
+            return _load_json_file_with_cache(path, throw_exception_if=_is_only_on_qa)
+        elif os.path.isfile(parents_path):
+            return _load_json_file_with_cache(parents_path, throw_exception_if=_is_only_on_qa)
+        else:
+            return {}
 
 class LocalDaemonBundleFetcher(BundleFetcherBase):
     def fetch_include_html(self, bundle_path):
@@ -499,17 +586,12 @@ class S3BundleFetcher(BundleFetcherBase):
 
     def get_dependency_version_snapshot(self):
         '''
-        For every project in the lcoal static_conf.json,
+        For every project in the local static_conf.json,
         get the current version of that dependency.
 
         returns a dictionary in the form project_name=>build version
         '''
-        project_name_to_version = {}
-        project_names = self._get_static_conf_data().get('deps', {}).keys() + [self.host_project_name]
-        for project_name in project_names:
-            version = self._fetch_build_version(project_name)
-            project_name_to_version[project_name] = version
-        return project_name_to_version
+        return self._fetch_all_dependency_versions()
 
     def make_url_to_pointer(self, pointer, project_name):
         # if the version is just an integer, that represents a major version, and so we create
@@ -601,20 +683,6 @@ class S3BundleFetcher(BundleFetcherBase):
 
         return build_version
 
-    def _get_version_from_static_conf(self, project_name):
-        deps = self._get_static_conf_data().get('deps', {})
-
-        if not deps.get(project_name):
-            logger.error("Tried to find a dependency (%s) in static_conf.json, but it didn't exist. Your static_conf.json must include all the static dependencies that your project may reference." % project_name)
-
-        return deps.get(project_name, 'current')
-
-    def _get_static_conf_data(self):
-        path = os.path.join(self.project_directory, 'static/static_conf.json')
-        if not os.path.isfile(path):
-            return {}
-        return _load_json_file_with_cache(path, throw_exception_if=_is_only_on_qa)
-
     def _fetch_version_from_version_pointer(self, pointer, project_name):
         '''
         Pointer is either 'current' or 'edge'.  This method downloads the pointer
@@ -682,7 +750,7 @@ class S3BundleFetcher(BundleFetcherBase):
           return cmp(x[1], y[1])
 
     def get_domain(self):
-        return get_bender_or_static3_setting('BENDER_CDN_DOMAIN', 'static2cdn.hubspot.com')
+        return get_bender_or_static3_setting('BENDER_CDN_DOMAIN', 'static.hsappstatic.net')
 
     def _get_non_cdn_domain(self):
         '''
