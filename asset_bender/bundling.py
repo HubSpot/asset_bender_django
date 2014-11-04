@@ -80,7 +80,7 @@ def _extract_bender_assets_instance_from_template_context(template_context, bend
         bender_assets = BenderAssets()
 
     if template_context and not template_context.get(BENDER_ASSETS_CONTEXT_NAME):
-        template_context.set(BENDER_ASSETS_CONTEXT_NAME, bender_assets)
+        template_context[BENDER_ASSETS_CONTEXT_NAME] = bender_assets
 
     return bender_assets
 
